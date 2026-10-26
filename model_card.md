@@ -88,6 +88,8 @@ When the query is about something not covered in the docs at all, and when the r
 - Top-k limit: at most 3 chunks returned by default
 - Explicit refusal message: when `retrieve` returns empty, the answer is always "I do not know based on these docs."
 
+**Fix applied (Oct 26):** the code's word filter did not match this description (it kept 3+ character words with no stopword list, so "the" inflated scores, and `min_score` defaulted to 3). The filter now strips punctuation, drops a stopword list, keeps only 4+ character words, and `min_score` defaults to 2, matching the description above. Re-tested offline: "What is the capital of France?" and "What's 2 + 2?" now correctly refuse, the auth-token question still retrieves AUTH.md, and the database question now ranks DATABASE.md first.
+
 ---
 
 ## 6. Limitations and Future Improvements
