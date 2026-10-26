@@ -8,10 +8,27 @@ Core DocuBot class responsible for:
 """
 
 import os
+import re
 import glob
 
 
 class DocuBot:
+    # Words that carry no topic meaning. Without this list, short common
+    # words like "the" inflate every chunk's score past the guardrail and
+    # off-topic questions retrieve docs instead of refusing.
+    STOPWORDS = {
+        "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+        "do", "does", "did", "what", "where", "when", "why", "who", "whom",
+        "how", "which", "that", "this", "these", "those", "of", "to", "in",
+        "on", "for", "with", "by", "at", "from", "as", "and", "or", "but",
+        "if", "then", "than", "so", "such", "its", "it", "not", "no",
+        "can", "could", "should", "would", "will", "just", "about", "into",
+        "over", "after", "before", "between", "through", "during", "under",
+        "again", "further", "once", "here", "there", "all", "any", "both",
+        "each", "few", "more", "most", "other", "some", "own", "same",
+        "too", "very",
+    }
+
     def __init__(self, docs_folder="docs", llm_client=None):
         self.docs_folder = docs_folder
         self.llm_client = llm_client
@@ -54,7 +71,9 @@ class DocuBot:
         """
         index = {}
         for chunk_id, text in documents:
-            for word in set(text.lower().split()):
+            # Same tokenization as _content_words so query words match keys
+            # even when the doc word carries trailing punctuation.
+            for word in set(re.findall(r"[a-z0-9]+", text.lower())):
                 index.setdefault(word, [])
                 if chunk_id not in index[word]:
                     index[word].append(chunk_id)
@@ -65,8 +84,10 @@ class DocuBot:
     # -----------------------------------------------------------
 
     def _content_words(self, query):
-        """Return lowercase query words that are 3+ characters (filters stop words)."""
-        return [w for w in query.lower().split() if len(w) >= 3]
+        """Return lowercase content words: punctuation stripped, stopwords
+        dropped, only 4+ characters kept (matches the model card)."""
+        words = re.findall(r"[a-z0-9]+", query.lower())
+        return [w for w in words if len(w) >= 4 and w not in self.STOPWORDS]
 
     def score_document(self, query, text):
         """
@@ -79,7 +100,7 @@ class DocuBot:
         text_lower = text.lower()
         return sum(text_lower.count(w) for w in words)
 
-    def retrieve(self, query, top_k=3, min_score=3):
+    def retrieve(self, query, top_k=3, min_score=2):
         """
         Find the top_k most relevant chunks for a query.
         Chunks scoring below min_score are dropped — that's the guardrail.
@@ -113,14 +134,14 @@ class DocuBot:
     # Answering Modes
     # -----------------------------------------------------------
 
-    def answer_retrieval_only(self, query, top_k=3, min_score=3):
+    def answer_retrieval_only(self, query, top_k=3, min_score=2):
         """Mode 2: return raw matching chunks, no LLM."""
         snippets = self.retrieve(query, top_k=top_k, min_score=min_score)
         if not snippets:
             return "I do not know based on these docs."
         return "\n---\n".join(f"[{cid}]\n{text}\n" for cid, text in snippets)
 
-    def answer_rag(self, query, top_k=3, min_score=3):
+    def answer_rag(self, query, top_k=3, min_score=2):
         """Mode 3: retrieve first, then let the LLM synthesize from those chunks only."""
         if self.llm_client is None:
             raise RuntimeError(
